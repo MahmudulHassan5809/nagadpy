@@ -1,6 +1,6 @@
-import string
-import random
 import datetime
+import random
+import string
 
 
 def generate_challenge(string_length: int) -> str:
