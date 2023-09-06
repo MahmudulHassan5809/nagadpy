@@ -1,0 +1,19 @@
+{
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true
+    },
+    "python.linting.mypyEnabled": true,
+    "python.linting.mypyArgs": [
+        "--ignore-missing-imports",
+        "--follow-imports=silent",
+        "--show-column-numbers",
+        "disallow-any-generics",
+        "--strict"
+    ],
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.mypy_cache": true
+    }
+
+}
