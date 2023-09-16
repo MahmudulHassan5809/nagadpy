@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nagadpy"
-version = "0.1.7"
+version = "0.0.3"
 description = "Python Package To Handle Nagad Paymant Gateway"
 authors = ["MahmudulHassan5809 <mahmudul.hassan240@gmail.com>"]
 license = "MIT"
@@ -18,11 +18,14 @@ pre-commit = "^3.4.0"
 mypy = "^1.5.1"
 black = "^23.7.0"
 scriv = {extras = ["toml"], version = "^1.3.1"}
+pytest = "^7.4.1"
+pydantic = "^2.3.0"
+
 
 
 [tool.scriv]
 format = "md"
-version = "literal: nagadpy/__init__.py: __version__"
+version = "literal: src/nagadpy/__init__.py: __version__"
 
 [build-system]
 requires = ["poetry-core"]
