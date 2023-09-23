@@ -6,24 +6,34 @@ import requests
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-
-from .utils import generate_challenge, get_timestamp
+from nagadpy.exceptions import (
+    CheckProcessError,
+    DecryptionError,
+    EncryptionError,
+    PaymentCompleteError,
+    PaymentInitiationError,
+    RequestError,
+    SignatureGenerationError,
+)
+from nagadpy.utils import generate_challenge, get_host_ip_address, get_timestamp
 
 
 @dataclass
 class NagadPayment:
-    merchant_id: str
     base_url: str
-    amount: str
-    initiate_payment_path: str
-    complete_payment_path: str
+    merchant_id: str
     callback_url: str
-    invoice_number: str
-    host_ip: str
     private_key: str
     public_key: str
 
-    def _generate_signature(self, data: str) -> tuple[str, Exception | None]:
+    @property
+    def is_ready(self) -> bool:
+        """Check if all required properties are set."""
+        return all(
+            getattr(self, attr, None) is not None for attr in self.__annotations__
+        )
+
+    def _generate_signature(self, data: str) -> str:
         """
         Generate a digital signature for the given data using the private key.
 
@@ -35,22 +45,25 @@ class NagadPayment:
             base64-encoded string and an optional exception if an error occurs during the
             signature generation. If the operation is successful, the second element will be None.
         """
-        pk = (
-            "-----BEGIN RSA PRIVATE KEY-----\n"
-            + self.private_key
-            + "\n-----END RSA PRIVATE KEY-----"
-        )
+
         try:
+            pk = (
+                "-----BEGIN RSA PRIVATE KEY-----\n"
+                + self.private_key
+                + "\n-----END RSA PRIVATE KEY-----"
+            )
             private_key = serialization.load_pem_private_key(
                 pk.encode(), password=None, backend=default_backend()
             )
             sign = private_key.sign(data.encode(), padding.PKCS1v15(), hashes.SHA256())
             signature = base64.b64encode(sign)
-            return signature.decode("utf-8"), None
+            return signature.decode("utf-8")
         except Exception as e:
-            return None, e
+            raise SignatureGenerationError(
+                f"Error generating signature: {str(e)}"
+            ) from e
 
-    def _encrypt_data_using_public_key(self, data: str) -> tuple[str, Exception | None]:
+    def _encrypt_data_using_public_key(self, data: str) -> str:
         """
         Encrypt sensitive data using the provided public key.
 
@@ -62,42 +75,88 @@ class NagadPayment:
             base64-encoded string and an optional exception if an error occurs during the
             encryption. If the operation is successful, the second element will be None.
         """
-
-        pk = (
-            "-----BEGIN PUBLIC KEY-----\n"
-            + self.public_key
-            + "\n-----END PUBLIC KEY-----"
-        )
         try:
+            pk = (
+                "-----BEGIN PUBLIC KEY-----\n"
+                + self.public_key
+                + "\n-----END PUBLIC KEY-----"
+            )
             public_key = serialization.load_pem_public_key(
                 pk.encode(), backend=default_backend()
             )
             encrypted_data = public_key.encrypt(data.encode(), padding.PKCS1v15())
-            data = base64.b64encode(encrypted_data)
-            return data.decode("utf-8"), None
+            encoded_data = base64.b64encode(encrypted_data)
+            return encoded_data.decode("utf-8")
         except Exception as e:
-            return None, e
+            raise EncryptionError(f"Error encrypting data: {str(e)}") from e
 
-    def _decrypt_data_using_private_key(self, data: str) -> tuple:
+    def _decrypt_data_using_private_key(self, data: bytes) -> str:
+        """
+        Decrypts the provided encrypted data using the merchant's private key.
+
+        Args:
+            data (str): The encrypted data to be decrypted.
+
+        Returns:
+            str: The decrypted plaintext message.
+
+        Raises:
+            DecryptionError: If an error occurs during the decryption process.
+
+        Note:
+            This method assumes that the private key has been previously loaded and is stored
+            in the `private_key` attribute of the class.
+
+        Example:
+            To decrypt encrypted_data using a merchant's private key, you can call this method as follows:
+
+            decrypted_message = self._decrypt_data_using_private_key(encrypted_data)
+        """
+
         merchant_private_key = self.private_key
-        pk = (
-            "-----BEGIN RSA PRIVATE KEY-----\n"
-            + merchant_private_key
-            + "\n-----END RSA PRIVATE KEY-----"
-        )
+
         try:
+            pk = (
+                "-----BEGIN RSA PRIVATE KEY-----\n"
+                + merchant_private_key
+                + "\n-----END RSA PRIVATE KEY-----"
+            )
             private_key = serialization.load_pem_private_key(
                 pk.encode(), password=None, backend=default_backend()
             )
             original_message = private_key.decrypt(data, padding.PKCS1v15())
-            return original_message.decode("utf-8"), None
+            return original_message.decode("utf-8")
         except Exception as e:
-            return None, e
+            raise DecryptionError(f"Error decrypting data: {str(e)}") from e
 
-    def _send_request(self, data: dict, url: str) -> tuple:
+    def _send_request(self, data: dict, url: str) -> dict:
+        """
+        Sends an HTTP POST request to the specified URL with the provided JSON data and headers.
+
+        Args:
+            data (dict): A dictionary representing the JSON data to be sent in the request body.
+            url (str): The URL to which the request will be sent.
+
+        Returns:
+            dict: A dictionary representing the JSON response from the server.
+
+        Raises:
+            RequestError: If there is an error during the request or if the response status code is not 200.
+
+        Note:
+            This method sends a POST request with JSON data and includes specific headers such as "Content-Type",
+            "X-KM-IP-V4", "X-KM-Client-Type", and "X-KM-Api-Version".
+
+        Example:
+            To send a request with JSON data to a specific URL, you can call this method as follows:
+
+            request_data = {"key1": "value1", "key2": "value2"}
+            response_data = self._send_request(request_data, "https://example.com/api")
+        """
+
         headers = {
             "Content-Type": "application/json",
-            "X-KM-IP-V4": self.host_ip,
+            "X-KM-IP-V4": get_host_ip_address(),
             "X-KM-Client-Type": "PC_WEB",
             "X-KM-Api-Version": "v-0.2.0",
         }
@@ -106,113 +165,200 @@ class NagadPayment:
             response = requests.post(url, json.dumps(data), headers=headers)
             json_response = response.json()
             if response.status_code != 200:
-                return None, json_response
-            return json_response, None
+                raise RequestError(
+                    f"HTTP error {response.status_code}: {json_response}"
+                )
+            return json_response
         except Exception as e:
-            return None, e
+            raise RequestError(f"Request error: {str(e)}")
 
-    def _initiate_payment(self):
-        now = get_timestamp()
+    def _initiate_payment(self, invoice_number: str) -> dict:
+        """
+        Initiates a payment by sending a request to the payment gateway's initialization endpoint.
 
-        sensitive_data = {
-            "merchantId": self.merchant_id,
-            "orderId": self.invoice_number,
-            "challenge": generate_challenge(40),
-            "datetime": now,
-        }
+        Args:
+            invoice_number (str): The unique invoice number or identifier for the payment.
 
-        sensitive_data_str = json.dumps(sensitive_data.model_dump())
+        Returns:
+            dict: A dictionary containing the response from the payment gateway.
 
-        encrypted_sensitive_data, err = self._encrypt_data_using_public_key(
-            sensitive_data_str
-        )
+        Raises:
+            PaymentInitiationError: If there is an error during payment initiation, including issues with
+                signature generation, data encryption, or the HTTP request.
 
-        if err:
-            return None, err
+        Example:
+            To initiate a payment, you can call this method with the invoice number:
 
-        signature, err = self._generate_signature(sensitive_data_str)
+            payment_info = self._initiate_payment("INV12345")
+        """
 
-        if err:
-            return None, err
-
-        data = {
-            "dateTime": now,
-            "sensitiveData": encrypted_sensitive_data,
-            "signature": signature,
-        }
-
-        url = f"{self.base_url}/{self.initiate_payment_path}/{self.merchant_id}/{self.invoice_number}"
-
-        result, error = self._send_request(data=data, url=url)
-
-        return result, error
+        try:
+            now = get_timestamp()
+            sensitive_data = {
+                "merchantId": self.merchant_id,
+                "orderId": invoice_number,
+                "challenge": generate_challenge(40),
+                "datetime": now,
+            }
+            sensitive_data_str = json.dumps(sensitive_data)
+            encrypted_sensitive_data = self._encrypt_data_using_public_key(
+                sensitive_data_str
+            )
+            signature = self._generate_signature(sensitive_data_str)
+            data = {
+                "dateTime": now,
+                "sensitiveData": encrypted_sensitive_data,
+                "signature": signature,
+            }
+            url = f"{self.base_url}/check-out/initialize/{self.merchant_id}/{invoice_number}"
+            result = self._send_request(data=data, url=url)
+            return result
+        except (SignatureGenerationError, EncryptionError, RequestError) as e:
+            raise PaymentInitiationError(str(e)) from e
+        except Exception as e:
+            raise PaymentInitiationError(str(e))
 
     def _complete_payment(
         self,
+        amount: str,
+        invoice_number: str,
         challenge: str,
         payment_reference_id: str,
-    ):
-        sensitive_data = {
-            "merchantId": self.merchant_id,
-            "orderId": self.invoice_number,
-            "currencyCode": "050",
-            "amount": self.amount,
-            "challenge": challenge,
-        }
+    ) -> dict:
+        """
+        Completes a payment by sending a request to the payment gateway's completion endpoint.
 
-        sensitive_data_str = json.dumps(sensitive_data)
-        encrypt_result, encrypt_err = self._encrypt_data_using_public_key(
-            sensitive_data_str
-        )
+        Args:
+            amount (str): The amount to be paid.
+            invoice_number (str): The unique invoice number or identifier for the payment.
+            challenge (str): A challenge associated with the payment.
+            payment_reference_id (str): The reference identifier for the payment.
 
-        if encrypt_err:
-            return None, encrypt_err
+        Returns:
+            dict: A dictionary containing the response from the payment gateway.
 
-        signature_result, signature_err = self._generate_signature(sensitive_data_str)
+        Raises:
+            PaymentCompleteError: If there is an error during payment completion, including issues with
+                signature generation, data encryption, or the HTTP request.
 
-        if signature_err:
-            return None, signature_err
+        Example:
+            To complete a payment, you can call this method with the required parameters:
 
-        data = {
-            "dateTime": get_timestamp(),
-            "sensitiveData": encrypt_result,
-            "signature": signature_result,
-            "merchantCallbackURL": self.callback_url,
-            "additionalMerchantInfo": {},
-        }
+            payment_info = self._complete_payment("100.00", "INV12345", "challenge123", "REF456")
+        """
 
-        url = f"{self.base_url}/{self.complete_payment_path}/{payment_reference_id}"
+        try:
+            sensitive_data = {
+                "merchantId": self.merchant_id,
+                "orderId": invoice_number,
+                "currencyCode": "050",
+                "amount": amount,
+                "challenge": challenge,
+            }
 
-        result, error = self._send_request(data=data, url=url)
+            sensitive_data_str = json.dumps(sensitive_data)
+            encrypt_result = self._encrypt_data_using_public_key(sensitive_data_str)
 
-        return result, error
+            signature_result = self._generate_signature(sensitive_data_str)
 
-    def nagad_checkout_process(self):
-        initiated_result, initiated_err = self._initiate_payment()
+            data = {
+                "dateTime": get_timestamp(),
+                "sensitiveData": encrypt_result,
+                "signature": signature_result,
+                "merchantCallbackURL": self.callback_url,
+                "additionalMerchantInfo": {},
+            }
 
-        if initiated_err or not initiated_result.get("sensitiveData"):
-            return None, initiated_err
+            url = f"{self.base_url}/check-out/complete/{payment_reference_id}"
 
-        sensitive_data = initiated_result.get("sensitiveData")
+            result = self._send_request(data=data, url=url)
+            return result
+        except (SignatureGenerationError, EncryptionError, RequestError) as e:
+            raise PaymentCompleteError(str(e)) from e
+        except Exception as e:
+            raise PaymentCompleteError(str(e))
 
-        decrypted_result, decrypted_err = self._decrypt_data_using_private_key(
-            base64.b64decode(sensitive_data)
-        )
+    def checkout_process(self, amount: str, invoice_number: str) -> dict:
+        """
+        Initiates and completes the payment process for a given amount and invoice number.
 
-        if decrypted_err:
-            return None, decrypted_err
+        Args:
+            amount (str): The amount to be paid.
+            invoice_number (str): The unique invoice number or identifier for the payment.
 
-        decrypted_sensitive_data_dict = json.loads(decrypted_result)
+        Returns:
+            dict: A dictionary containing the response from the payment gateway after completion.
+            Example:  ```{"callBackUrl": "", "status": ""}```
 
-        if not decrypted_sensitive_data_dict.get(
-            "paymentReferenceId"
-        ) or not decrypted_sensitive_data_dict.get("challenge"):
-            return None, decrypted_err
+        Raises:
+            PaymentCompleteError: If there is an error during the payment process, including issues with
+                initiation, decryption, completion, or missing required data.
 
-        payment_reference_id = decrypted_sensitive_data_dict.get("paymentReferenceId")
-        challenge = decrypted_sensitive_data_dict.get("challenge")
 
-        complete_result, complete_err = self._complete_payment(
-            challenge, payment_reference_id
-        )
-        return complete_result, complete_err
+        Example:
+            To perform a payment process, you can call this method with the amount and invoice number:
+            ```
+            nagad_payment = NagadPayment(
+                merchant_id=MERCHANT_ID,
+                callback_url=CALLBACK_URL,
+                base_url=BASE_URL,
+                public_key=PUBLIC_KEY,
+                private_key=PRIVATE_KEY,
+            )
+            payment_response = nagad_payment.checkout_process("100.00", "INV12345")
+            ```
+
+        Callback Response:
+            Method: GET
+            QueryParams Example:
+            ```
+            {
+                "merchant": "",
+                "order_id": "",
+                "payment_ref_id": "",
+                "status": "",
+                "status_code": "",
+                "message": ""
+            }
+            ```
+        """
+        if not self.is_ready:
+            raise ValueError("All payment information properties must be set")
+        try:
+            initiated_result = self._initiate_payment(invoice_number=invoice_number)
+
+            sensitive_data = initiated_result.get("sensitiveData")
+
+            if not sensitive_data:
+                raise CheckProcessError(
+                    "sensitive data is missing from initiated_result"
+                )
+
+            decrypted_result = self._decrypt_data_using_private_key(
+                base64.b64decode(sensitive_data)
+            )
+
+            decrypted_sensitive_data_dict = json.loads(decrypted_result)
+
+            if not decrypted_sensitive_data_dict.get(
+                "paymentReferenceId"
+            ) or not decrypted_sensitive_data_dict.get("challenge"):
+                raise CheckProcessError(
+                    "paymentReferenceId and challenge data is missing from initiated_result"
+                )
+
+            payment_reference_id = decrypted_sensitive_data_dict.get(
+                "paymentReferenceId"
+            )
+            challenge = decrypted_sensitive_data_dict.get("challenge")
+            complete_result = self._complete_payment(
+                amount=amount,
+                invoice_number=invoice_number,
+                challenge=challenge,
+                payment_reference_id=payment_reference_id,
+            )
+            return complete_result
+        except (DecryptionError, PaymentInitiationError, PaymentCompleteError) as e:
+            raise PaymentCompleteError(str(e)) from e
+        except Exception as e:
+            raise PaymentCompleteError(str(e))
