@@ -58,3 +58,14 @@ repos:
     rev: v1.5.1
     hooks:
       - id: mypy
+
+  - repo: local
+    hooks:
+    - id: pytest-check
+      default_stages: [commit]
+      types: [python]
+      name: pytest-check
+      entry: python -m pytest
+      language: system
+      pass_filenames: false
+      always_run: true
