@@ -12,6 +12,7 @@ def nagad_payment() -> NagadPayment:
         callback_url="https://callback.com",
         private_key="dummy_private_key",
         public_key="dummy_public_key",
+        client_ip_address="1.1.1.1",
     )
     return nagad_payment
 

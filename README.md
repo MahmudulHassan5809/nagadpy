@@ -45,26 +45,29 @@ You can set these values as environment variables or hardcode them in your appli
 To initiate a payment, you can create an instance of the `NagadPayment` class and call the `checkout_process` method. Here's an example using FastAPI:
 
 ```python
+from typing import Any
 from fastapi import FastAPI
 from nagadpy import NagadPayment
 
 app = FastAPI()
 
-# Initialize NagadPayment with your merchant information
-nagad_payment = NagadPayment(
-    merchant_id="YOUR_MERCHANT_ID",
-    callback_url="YOUR_CALLBACK_URL",
-    base_url="NAGAD_API_BASE_URL",
-    public_key="YOUR_PUBLIC_KEY",
-    private_key="YOUR_PRIVATE_KEY",
-)
 
 @app.get("/")
-def initiate_payment():
+def initiate_payment() -> Any:
+    # Initialize NagadPayment with your merchant information
+    nagad_payment = NagadPayment(
+        merchant_id="YOUR_MERCHANT_ID",
+        callback_url="YOUR_CALLBACK_URL",
+        base_url="NAGAD_API_BASE_URL",
+        public_key="YOUR_PUBLIC_KEY",
+        private_key="YOUR_PRIVATE_KEY",
+        client_ip_address="CLIENT_IP_ADDRESS",
+    )
+
     try:
         payment_response = nagad_payment.checkout_process(
             amount="50.00",
-            invoice_number="YOUR_INVOICE_NUMBER",
+            invoice_number="INVOICE_NUMBER",
         )
         # Handle the payment response, which contains the payment URL and status.
         # you can redirect url or you can send url to frontend based on status
@@ -73,10 +76,7 @@ def initiate_payment():
     except Exception as e:
         # Handle any exceptions that may occur during the payment process
         logger.error(str(e))
-    return {
-        "payment_url": payment_response.get("callBackUrl"),
-        "message": "success"
-    }
+    return {"payment_url": payment_response.get("callBackUrl"), "message": "success"}
 ```
 
 ### Handling Payment Callbacks

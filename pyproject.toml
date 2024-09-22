@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nagadpy"
-version = "0.0.1"
+version = "0.0.2"
 description = "Python Package To Handle Nagad Paymant Gateway"
 authors = ["MahmudulHassan5809 <mahmudul.hassan240@gmail.com>"]
 license = "MIT"

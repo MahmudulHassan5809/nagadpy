@@ -30,18 +30,3 @@ def get_timestamp() -> str:
     tz = pytz.timezone("Asia/Dhaka")
     now = datetime.datetime.now(tz)
     return now.strftime("%Y%m%d%H%M%S")
-
-
-def get_host_ip_address() -> str | None:
-    """
-    Get the IP address of the host machine.
-
-    Returns:
-        str or None: The IP address of the host machine or None if it cannot be determined.
-    """
-    try:
-        hostname = socket.gethostname()
-        ip_address = socket.gethostbyname(hostname)
-        return ip_address
-    except OSError:
-        return None

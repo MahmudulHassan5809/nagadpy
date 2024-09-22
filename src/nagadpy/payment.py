@@ -15,7 +15,7 @@ from nagadpy.exceptions import (
     RequestError,
     SignatureGenerationError,
 )
-from nagadpy.utils import generate_challenge, get_host_ip_address, get_timestamp
+from nagadpy.utils import generate_challenge, get_timestamp
 
 
 @dataclass
@@ -25,6 +25,7 @@ class NagadPayment:
     callback_url: str
     private_key: str
     public_key: str
+    client_ip_address: str
 
     @property
     def is_ready(self) -> bool:
@@ -156,7 +157,7 @@ class NagadPayment:
 
         headers = {
             "Content-Type": "application/json",
-            "X-KM-IP-V4": get_host_ip_address(),
+            "X-KM-IP-V4": self.client_ip_address,
             "X-KM-Client-Type": "PC_WEB",
             "X-KM-Api-Version": "v-0.2.0",
         }
